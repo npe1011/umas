@@ -1,0 +1,98 @@
+#!/usr/bin/env python3
+
+# start_uma script must be run first to launch calculator server
+
+# This is called by 
+# scriptname basename_EXT.extinp.tmp [args]
+# from ORCA input as 
+# ! ExtOpt
+# %method
+#  ProgExt "/full/path/to/script"
+#  Ext_Params "optional command line arguments"
+# end
+# https://www.faccts.de/docs/orca/6.0/manual/contents/detailed/geomopt.html#orca-as-external-optimizer
+
+import os
+import sys
+import argparse
+
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from _common_utils import send_task
+
+
+def remove_comment(src: str) -> str:
+    return src.strip().split('#')[0].strip()
+
+
+def read_xyz(file):
+    with open(file) as f:
+       data = f.readlines()
+       num_atoms = int(data[0].strip())
+       coord = data[2:2+num_atoms]
+    return num_atoms, coord
+
+
+def main():
+    parser = argparse.ArgumentParser('ORCA/uma calculator server interface')
+    parser.add_argument('file')
+    args = parser.parse_args()
+
+    # Read input from ORCA
+    with open(args.file) as f:
+        xyz_file = remove_comment(f.readline())
+        charge = int(remove_comment(f.readline()))
+        mult = int(remove_comment(f.readline()))
+        num_threads = int(remove_comment(f.readline()))
+        require_grad = (int(remove_comment(f.readline())) == 1)
+
+    # Read xyz
+    num_atoms, coord = read_xyz(xyz_file)
+
+    # Calculate by Calculator Sever
+    task = {
+        'charge': charge,
+        'mult': mult,
+        'num_threads': num_threads,
+        'coord': coord,
+        'hessian': False
+    }
+
+    result = send_task(task)
+    if 'error' in result:
+        print('Error: ', result['error'])
+        sys.exit(1)
+    
+    energy = result['energy']
+    gradient = result['gradient']
+
+    # Output
+    output_file_name = args.file.rstrip('.extinp.tmp') + '.engrad'
+    with open(output_file_name, mode='w', encoding='utf-8', newline='\n') as f:
+        f.writelines([
+            '# \n',
+            '# Number of atoms\n',
+            '# \n',
+            f'{num_atoms}\n',
+            '# \n',
+            '# The current total energy in Eh\n',
+            '# \n',
+            f'{energy:.12f}\n'
+        ])
+        if require_grad:
+            f.writelines([
+            '# \n',
+            '# The current gradient in Eh/bohr: Atom1X, Atom1Y, Atom1Z, Atom2X, etc.\n',
+            '# \n'
+            ])
+            for g in gradient.flatten():
+                f.write(f'{g:.12f}\n')
+    
+    # Single Point Energy to STDOUT (merged with ORCA log)
+    # The same format as ORCA6 (to read/parse log easily)
+    print('\n-------------------------   --------------------')
+    print(f'FINAL SINGLE POINT ENERGY   {energy:>20.12f}')
+    print('-------------------------   --------------------\n')
+
+
+if __name__ == '__main__':
+    main()

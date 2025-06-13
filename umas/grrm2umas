@@ -1,0 +1,218 @@
+#!/usr/bin/env python3
+# start_uma script must be run first to launch calculator server
+import os
+import sys
+from pathlib import Path
+
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from _common_utils import send_task
+
+# GRRM file name-related constants
+GRRM_INPUT_SUFFIX = '_INP4GEN.rrm'
+GRRM_OUTPUT_SUFFIX = '_OUT4GEN.rrm'
+
+# Name for environmental variables for UMA Settings
+UMA_CHARGE_ENV = 'UMA_CHARGE'
+UMA_MULTI_ENV = 'UMA_MULTI'
+UMA_THREADS = 'UMA_THREADS'
+
+
+def throw_error(message):
+    print(message, file=sys.stderr)
+    sys.exit(-1)
+
+
+class GRRMInputData:
+    def __init__(self, input_file):
+        if not os.path.exists(input_file):
+            throw_error(input_file + ' not found.')
+        with open(input_file, 'r') as f:
+            input_row_data = f.readlines()
+
+        # TASK line
+        task_string = input_row_data[0].split(':')[1].strip()
+        if task_string == 'MAKE GUESS':
+            self.task = 'guess'
+        elif task_string == 'MICROITERATION':
+            self.task = 'mi'
+        elif task_string == 'ENERGY':
+            self.task = 'e'
+        elif task_string == 'ENERGY and GRADIENT':
+            self.task = 'eg'
+        elif task_string == 'ENERGY, GRADIENT, and HESSIAN':
+            self.task = 'egh'
+        else:
+            throw_error(input_file + ' contains unexpected task type: ' + task_string)
+
+        # neglect GUESS and STATE lines
+
+        # NACTIVEATOM / NATOM: M / N
+        self.num_activation_atom, self.num_atom = [int(x.strip()) for x in input_row_data[3].split(':')[1].split('/')]
+
+        # atom coordinates
+        self.atom_coordinates = [line.replace('\t', '    ') for line in input_row_data[4:4+self.num_atom]]
+
+        # NFROZENATOM: N
+        self.num_frozen_atom = int(input_row_data[4+self.num_atom].split(':')[1].strip())
+
+        # frozen atom coordinates
+        if self.num_frozen_atom > 0:
+            self.frozen_atom_coordinates = [line.replace('\t', '    ') for line \
+                                            in input_row_data[5+self.num_atom:5+self.num_atom+self.num_frozen_atom]]
+        else:
+            self.frozen_atom_coordinates = []
+
+
+def resize_gradient(gradient, num_atom):
+    if num_atom >= len(gradient):
+        return gradient
+    return gradient[0:num_atom]
+
+
+def resize_hessian(hessian, num_atom):
+    size_n = num_atom * 3
+    if size_n >= len(hessian):
+        return hessian
+    resized_hessian = []
+    for line in hessian[0:size_n]:
+        resized_hessian.append(line[0:size_n])
+    return resized_hessian
+
+
+def convert_hessian_to_grrm(hessian):
+    """
+    convert hessian (3N*3N list) for GRRM format and return in str list (for writelines)
+    :param hessian:
+    """
+    if len(hessian) % 5 == 0:
+        num_block = len(hessian)//5
+    else:
+        num_block = len(hessian)//5 + 1
+
+    formatted_hessian = []
+    for block in range(num_block):
+        for row in range(5*block, len(hessian)):
+            line = ''
+            for col in range(5*block, min(5*block+5, len(hessian), row+1)):
+                if type(line) is str:
+                    line += ' {:>16}'.format(hessian[row][col])
+                else:
+                    line += ' {:>16.12f}'.format(hessian[row][col])
+            line += '\n'
+            formatted_hessian.append(line)
+
+    return formatted_hessian
+
+
+def convert_gradient_to_grrm(gradient):
+    """
+    convert gradient (num_atom*3 list) for GRRM format and return in str list (for writelines)
+    """
+    grrm_gradient = []
+    for line in gradient:
+        grrm_gradient.extend([f'  {x:.12f}\n' for x in line])
+    return grrm_gradient
+
+
+def get_dummy_hessian_grrm(num_atom):
+    size_n = num_atom * 3
+    hessian = [['0.000000000000' for m in range(size_n)] for n in range(size_n)]
+    return convert_hessian_to_grrm(hessian)
+
+
+def get_dummy_gradient_grrm(num_atom):
+    return ['  0.000000000000\n' for n in range(num_atom*3)]
+
+
+def get_dummy_dipole_derivatives(num_atom):
+    return ['  0.000000000000  0.000000000000  0.000000000000\n'for n in range(num_atom*3)]
+
+
+def main():
+    args = sys.argv
+    job_name = args[1]
+
+    input_file = Path(job_name + GRRM_INPUT_SUFFIX).resolve()
+    output_file = Path(job_name + GRRM_OUTPUT_SUFFIX).resolve()
+
+    input_data = GRRMInputData(input_file)
+
+    # Only energy and gradient are available.
+    if input_data.task in ['guess', 'mi']:
+        throw_error('Only ENERGY, GRADIENT, HESSIAN are available with uma.')
+
+    # prepare task
+    # charge
+    charge = 0
+    uma_charge = os.environ.get(UMA_CHARGE_ENV)
+    if uma_charge is not None:
+        if len(uma_charge.strip()) > 0:
+            charge = int(uma_charge.strip())
+    
+    # mult
+    mult = 1
+    uma_mult = os.environ.get(UMA_MULTI_ENV)
+    if uma_mult is not None:
+        if len(uma_mult.strip()) > 0:
+            mult = int(uma_mult.strip())
+    
+    # num_threads
+    num_threads = 1
+    uma_threads = os.environ.get(UMA_THREADS)
+    if uma_threads is not None:
+        if len(uma_threads.strip()) > 0:
+            num_threads = int(uma_threads.strip())
+
+    # coord: List[str]
+    coord = input_data.atom_coordinates + input_data.frozen_atom_coordinates
+
+    # Calculate by Calculator Sever
+    task = {
+        'charge': charge,
+        'mult': mult,
+        'num_threads': num_threads,
+        'coord': coord,
+        'hessian': input_data.task == 'egh'
+    }
+
+    result = send_task(task)
+    if 'error' in result:
+        throw_error('Error: ' + result['error'])
+    
+    energy = result['energy']  # float 
+    gradient = result['gradient'] # numpy array N*3
+
+    # Prepare output file for GRRM
+    output_data = []
+    output_data.append('RESULTS\n')
+    output_data.append('CURRENT COORDINATE\n')
+    output_data.extend(input_data.atom_coordinates)
+    output_data.append(f'ENERGY =  {energy:.12f}  0.000000000000  0.000000000000\n')
+    output_data.append('       =  0.000000000000  0.000000000000  0.000000000000\n')
+    output_data.append('S**2   =  0.000000000000\n')
+    output_data.append('GRADIENT\n')
+    if input_data.task in ['eg', 'egh']:
+        gradient = resize_gradient(gradient, input_data.num_atom)
+        output_data.extend(convert_gradient_to_grrm(gradient))
+    else:
+        output_data.extend(get_dummy_gradient_grrm(input_data.num_atom))
+    output_data.append('DIPOLE =  0.000000000000  0.000000000000  0.000000000000\n')
+    output_data.append('HESSIAN\n')
+    if input_data.task == 'egh':
+        hessian = result['hessian']  # 3N*3N array. with frozen atoms
+        hessian = resize_hessian(hessian, input_data.num_atom) # without frozen atoms
+        output_data.extend(convert_hessian_to_grrm(hessian))
+    else:
+        output_data.extend(get_dummy_hessian_grrm(input_data.num_atom))
+    output_data.append('DIPOLE DERIVATIVES\n')
+    output_data.extend(get_dummy_dipole_derivatives(input_data.num_atom))
+    output_data.append('POLARIZABILITY\n')
+    output_data.append('  0.000000000000\n')
+    output_data.append('  0.000000000000  0.000000000000\n')
+    output_data.append('  0.000000000000  0.000000000000  0.000000000000\n')
+    with open(output_file, 'w') as f:
+        f.writelines(output_data)
+
+
+if __name__ == '__main__':
+    main()

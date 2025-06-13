@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+import sys
+import socket
+import multiprocessing
+import os
+import time
+import argparse
+import warnings
+from pathlib import Path
+from multiprocessing import Queue
+warnings.simplefilter('ignore')
+
+from ase import Atoms
+from ase.vibrations import Vibrations
+from ase.units import Hartree, Bohr
+import torch
+from fairchem.core import FAIRChemCalculator
+from fairchem.core.units.mlip_unit import load_predict_unit
+
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from _common_utils import recv_pickle, send_pickle, get_port_number, save_port_file, remove_port_file
+
+MODEL_FILE = {
+    'small': 'uma-s-1.pt'
+}
+
+
+def process_task(task, calculator):
+    try:
+        torch.set_num_threads(task['num_threads'])
+        os.environ['OMP_NUM_THREADS'] = str(task['num_threads'])
+        os.environ['MKL_NUM_THREADS'] = str(task['num_threads'])
+
+        symbols = []
+        positions = []
+        for line in task['coord']:
+            parts = line.split()
+            symbols.append(parts[0])
+            positions.append([float(x) for x in parts[1:4]])
+
+        atoms = Atoms(symbols=symbols, positions=positions)
+        atoms.info = {'charge': task['charge'], 'spin': task['mult']}
+        atoms.set_calculator(calculator)
+
+        energy = atoms.get_potential_energy() / Hartree
+        gradient = -1.0 * atoms.get_forces() / (Hartree / Bohr)
+
+        # Calculate numerical Hessian when requested
+        if 'hessian' in task and task['hessian']:
+            # tmp_name = 'hess_' + str(os.getpid()) + str(time.time()).replace('.', '_')
+            tmp_name = 'calchess_' + str(os.getpid())
+            vib = Vibrations(atoms=atoms, name=tmp_name, delta=0.005)
+            vib.run()
+            vib_data = vib.get_vibrations()
+            hessian = vib_data.get_hessian_2d() / (Hartree / (Bohr * Bohr))
+            vib.clean()
+        else:
+            hessian = None
+
+        return {
+            'energy': energy,
+            'gradient': gradient,
+            'hessian' : hessian
+        }
+
+    except Exception as e:
+        return {'error': str(e)}
+
+
+def handle_connection(conn, exit_event, calculator):
+    with conn:
+        obj = recv_pickle(conn)
+        if obj == 'EXIT':
+            exit_event.set()
+            return
+        result = process_task(obj, calculator)
+        send_pickle(conn, result)
+
+
+def worker(server_socket, exit_event, model, ready_queue):
+    # Model and Calculator
+    model_path = str(Path(__file__).absolute().parent / MODEL_FILE[model])
+    uma_predictor = load_predict_unit(path=model_path, device='cpu')
+    calculator = FAIRChemCalculator(uma_predictor, task_name='omol')
+
+    ready_queue.put('ready')
+
+    # Listen
+    while not exit_event.is_set():
+        try:
+            conn, _ = server_socket.accept()
+            handle_connection(conn, exit_event, calculator)
+        except OSError:
+            break
+
+
+def main():
+    parser = argparse.ArgumentParser('uma ase calculator server')
+    parser.add_argument('command', choices=['start', 'exit'])
+    parser.add_argument('--np', '-n', '-p', type=int, default=1)
+    parser.add_argument('--model', '-m', choices=['small'], default='small')
+    args = parser.parse_args()
+
+    if args.command == 'start':
+        start(num_workers=args.np, model=args.model)
+    elif args.command == 'exit':
+        send_exit()
+
+
+def start(num_workers, model):
+    exit_event = multiprocessing.Event()
+
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server_socket.bind(('localhost', 0))
+    port = server_socket.getsockname()[1]
+
+    server_socket.listen()
+
+    ready_queue = Queue()
+
+    processes = []
+    for _ in range(num_workers):
+        server_socket_fd = os.dup(server_socket.fileno())
+        p = multiprocessing.Process(
+            target=worker,
+            args=(socket.socket(fileno=server_socket_fd), exit_event, model, ready_queue)
+        )
+        p.start()
+        processes.append(p)
+
+    # Wait calculator loading
+    for _ in range(num_workers):
+        msg = ready_queue.get()
+        if msg != 'ready':
+            print(f'Unexpected message from worker: {msg}')
+
+    # Save server port number => ready for calculation
+    save_port_file(port)
+
+    exit_event.wait()
+    for p in processes:
+        p.terminate()
+        p.join()
+
+    server_socket.close()
+
+
+def send_exit():
+    port = get_port_number()
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.connect(('localhost', port))
+            send_pickle(s, 'EXIT')
+    except Exception as e:
+        print(f'Error in send exit message to calculator: {e}')
+        sys.exit(1)
+    remove_port_file()
+
+
+if __name__ == '__main__':
+    main()
