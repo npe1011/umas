@@ -5,6 +5,7 @@ import multiprocessing
 import os
 import time
 import argparse
+import shutil
 import warnings
 from pathlib import Path
 from multiprocessing import Queue
@@ -19,6 +20,7 @@ from fairchem.core.units.mlip_unit import load_predict_unit
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from _common_utils import recv_pickle, send_pickle, get_port_number, save_port_file, remove_port_file
+from _common_utils import read_int_list_string, get_device_list
 
 MODEL_FILE = {
     'small': 'uma-s-1.pt'
@@ -54,6 +56,10 @@ def process_task(task, calculator):
             vib_data = vib.get_vibrations()
             hessian = vib_data.get_hessian_2d() / (Hartree / (Bohr * Bohr))
             vib.clean()
+            try:
+                shutil.rmtree(tmp_name)
+            except:
+                pass
         else:
             hessian = None
 
@@ -77,10 +83,10 @@ def handle_connection(conn, exit_event, calculator):
         send_pickle(conn, result)
 
 
-def worker(server_socket, exit_event, model, ready_queue):
+def worker(server_socket, exit_event, model, device, ready_queue):
     # Model and Calculator
     model_path = str(Path(__file__).absolute().parent / MODEL_FILE[model])
-    uma_predictor = load_predict_unit(path=model_path, device='cpu')
+    uma_predictor = load_predict_unit(path=model_path, device=device)
     calculator = FAIRChemCalculator(uma_predictor, task_name='omol')
 
     ready_queue.put('ready')
@@ -99,15 +105,35 @@ def main():
     parser.add_argument('command', choices=['start', 'exit'])
     parser.add_argument('--np', '-n', '-p', type=int, default=1)
     parser.add_argument('--model', '-m', choices=['small'], default='small')
+    # parser.add_argument('--gpu', '-g', nargs='?', const='0', default='None')
+    parser.add_argument('--gpu', '-g', action='store_true')
     args = parser.parse_args()
 
+
+    '''
+    Currently, fair-chem cannot use GPU number like cuda:0
+    # Create available GPU list (List[int]) > device list (List[str], cuda:x or cpu)
+    if args.gpu == 'None':
+        gpu_number_list = []
+    else:
+        gpu_number_list = read_int_list_string(args.gpu)
+    device_list = get_device_list(args.np, gpu_number_list)
+    '''
+
+    if args.gpu:
+        device_list = ['cuda']
+        for _ in range(args.np-1):
+            device_list.append('cpu')
+    else:
+        device_list = ['cpu' for _ in range(args.np)] 
+
     if args.command == 'start':
-        start(num_workers=args.np, model=args.model)
+        start(num_workers=args.np, model=args.model, device_list=device_list)
     elif args.command == 'exit':
         send_exit()
 
 
-def start(num_workers, model):
+def start(num_workers, model, device_list):
     exit_event = multiprocessing.Event()
 
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -120,11 +146,12 @@ def start(num_workers, model):
     ready_queue = Queue()
 
     processes = []
-    for _ in range(num_workers):
+    for i in range(num_workers):
         server_socket_fd = os.dup(server_socket.fileno())
+        device = device_list[i]
         p = multiprocessing.Process(
             target=worker,
-            args=(socket.socket(fileno=server_socket_fd), exit_event, model, ready_queue)
+            args=(socket.socket(fileno=server_socket_fd), exit_event, model, device, ready_queue)
         )
         p.start()
         processes.append(p)

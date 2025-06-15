@@ -1,0 +1,215 @@
+#!/usr/bin/env python3
+
+import sys
+import multiprocessing
+from multiprocessing import get_context
+import os
+import time
+from copy import deepcopy
+import argparse
+import warnings
+from pathlib import Path
+warnings.simplefilter('ignore')
+
+from ase import Atoms
+from ase.units import Hartree
+from ase.io import read, write
+from ase.optimize import LBFGS
+from ase.constraints import FixAtoms
+
+import torch
+from fairchem.core import FAIRChemCalculator
+from fairchem.core.units.mlip_unit import load_predict_unit
+
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from _common_utils import read_int_list_string, get_device_list
+
+MODEL_FILE = {
+    'small': 'uma-s-1.pt'
+}
+
+# Calculator is saved in Global in worker process to avoid reload Calculator and Model.
+CALCULATOR = None
+
+
+def save_xyz_conformers(atoms_list, file):
+    with open(file, 'w') as f:
+        for atoms in atoms_list:
+            f.write(f"{len(atoms)}\n")
+            energy_comment = atoms.info['final_energy']
+            f.write(f'{energy_comment}\n')
+            for atom in atoms:
+                symbol = atom.symbol
+                x, y, z = atom.position
+                f.write(f'{symbol:>2} {x:>20.12f} {y:>20.12f} {z:>20.12f}\n')
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description='Optimization of xyz file structure with uma/omol25')
+    parser.add_argument('xyzfile', help='Input XYZ file with multiple structures')
+    parser.add_argument('--procs', '-p', type=int, default=1, help='Number of parallel processes')
+    parser.add_argument('--threads', '-t', type=int, default=1, help='Number of threads per process')
+    parser.add_argument('--charge', '-c', type=int, default=0, help='Total molecular charge')
+    parser.add_argument('--mult', '-m', type=int, default=1, help='Spin multiplicity')
+    parser.add_argument('--model', choices=['small'], default='small')
+    # parser.add_argument('--gpu', '-g', nargs='?', const='0', default='None')
+    parser.add_argument('--gpu', '-g', action='store_true')
+    parser.add_argument('--fmax', type=float, default=0.05, help='Convergence criteria')
+    parser.add_argument('--maxcycle', type=int, default=500, help='Max cycle of optimization')
+    parser.add_argument('--constrain', type=str, help='List of atom indices (1-based) to fix during optimization')
+    return parser.parse_args()
+
+
+def get_worker_name(x):
+    time.sleep(1)
+    return multiprocessing.current_process().name
+
+
+def worker_task(atoms: Atoms, charge: int, mult: int, fixed_indices: list,
+                fmax: float, maxcycle: int,
+                model: str, device_dict: dict, num_threads: int):
+    global CALCULATOR
+
+    # Init calculator only for first run
+    if CALCULATOR is None:
+        torch.set_num_threads(num_threads)
+        os.environ['OMP_NUM_THREADS'] = str(num_threads)
+        os.environ['MKL_NUM_THREADS'] = str(num_threads)
+        model_path = str(Path(__file__).absolute().parent / MODEL_FILE[model])
+        uma_predictor = load_predict_unit(path=model_path, device=device_dict[multiprocessing.current_process().name])
+        CALCULATOR = FAIRChemCalculator(uma_predictor, task_name='omol')
+
+    if fixed_indices:
+        atoms.set_constraint(FixAtoms(indices=fixed_indices))
+
+    atoms.info = {'charge': charge, 'spin': mult}
+    atoms.calc = CALCULATOR
+
+    try:
+        opt = LBFGS(atoms, logfile=None)
+        opt.run(fmax=fmax, steps=maxcycle)
+        energy = atoms.get_potential_energy() / Hartree
+        atoms.calc = None
+        return atoms, energy, True
+    except Exception:
+        try:
+            energy = atoms.get_potential_energy() / Hartree
+            atoms.calc = None
+        except Exception:
+            energy = 0.0
+        return atoms, energy, False
+
+
+def main():
+    start_time = time.time()
+    args = parse_args()
+
+    '''
+    Currently, fair-chem cannot use GPU number like cuda:0
+    # Create available GPU list (List[int]) > device list (List[str], cuda:x or cpu)
+    if args.gpu == 'None':
+        gpu_number_list = []
+    else:
+        gpu_number_list = read_int_list_string(args.gpu)
+    device_list = get_device_list(args.procs, gpu_number_list)
+    '''
+    if args.gpu:
+        device_list = ['cuda']
+        for _ in range(args.procs-1):
+            device_list.append('cpu')
+    else:
+        device_list = ['cpu' for _ in range(args.procs)] 
+
+    # Fixed indices (convert to 0-based)
+    if args.constrain:
+        fixed_indices = [i-1 for i in read_int_list_string(args.constrain)]
+    else:
+        fixed_indices = []
+
+    # Read xyz to List[Atoms]
+    structures = read(args.xyzfile, index=':')
+
+    # Print Settings in log file
+    base = os.path.splitext(args.xyzfile)[0]
+    success_file = f'{base}_umaopt.xyz'
+    failed_file = f'{base}_umaopt_failed.xyz'
+    logfile = base + '_umaopt.log'
+    with open(logfile, 'w') as f:
+        f.write('Structure Optimization with UMA/Omol25\n\n')
+        f.write(f'Input xyz: {args.xyzfile}\n')
+        f.write(f'Number of structure: {len(structures)}\n')
+        f.write(f'Charge: {args.charge}\n')
+        f.write(f'Spin Multiplicity: {args.mult}\n')
+        f.write(f'Model: {args.model}\n')
+        f.write(f'Convergence fmax = {args.fmax:.3f}\n')
+        f.write(f'Max optimization cycles: {args.maxcycle:.3f}\n\n')
+        f.write(f'Parallelization Settings\n')
+        f.write(f'Number of parallel process: {args.procs}\n')
+        ds = ', '.join(device_list)
+        f.write(f'Device of each process: {ds}\n')
+        f.write(f'Number of cpu threading: {args.threads}\n\n')
+        f.write('Starting calculation......')
+
+    with get_context('spawn').Pool(processes=args.procs) as pool:
+        # Collect worker names and assign device
+        worker_names = set()
+        while len(worker_names) < args.procs:
+            names = pool.map(get_worker_name, [None] * args.procs * 5)
+            worker_names.update(names)
+        worker_names = sorted(list(worker_names))
+        assert len(worker_names) == len(device_list)
+        device_dict = dict()
+        for name, device in zip(worker_names, device_list):
+            device_dict[name] = device
+
+        task_list = []
+        for atoms in structures:
+            task_list.append([
+                deepcopy(atoms),
+                args.charge,
+                args.mult,
+                fixed_indices,
+                args.fmax,
+                args.maxcycle,
+                args.model,
+                device_dict,
+                args.threads
+            ])
+
+        results = pool.starmap(worker_task, task_list)
+
+    with open(logfile, 'a') as f:
+        f.write('Done!\n\n')
+
+    success_atoms = []
+    failed_atoms = []
+
+    for atoms, energy, converged in results:
+        atoms.info['final_energy'] = f'{energy:.12f}'
+        if converged:
+            success_atoms.append(atoms)
+        else:
+            failed_atoms.append(atoms)
+
+    if success_atoms:
+        save_xyz_conformers(success_atoms, success_file)
+    if failed_atoms:
+        save_xyz_conformers(failed_atoms, failed_file)
+
+    elapsed_time = time.time() - start_time
+    hours = int(elapsed_time) // 3600
+    minutes = (int(elapsed_time) % 3600) // 60
+    seconds = int(elapsed_time) % 60
+    formatted_time = f'{hours:02}:{minutes:02}:{seconds:02}'
+
+    with open(logfile, 'a') as f:
+        f.write(f'Converged structures: {len(success_atoms)}\n')
+        f.write(f'                 >> {success_file}\n')
+        f.write(f'Failed structures: {len(failed_atoms)}\n')
+        f.write(f'                 >> {failed_file}\n\n')
+        f.write('Normal termination of umaopt.\n')
+        f.write(f'Elapsed time:{formatted_time}\n')
+
+
+if __name__ == '__main__':
+    main()

@@ -88,3 +88,25 @@ def send_task(task):
         return result
 
 
+def read_int_list_string(list_string):
+    blocks = [x.strip() for x in list_string.strip().replace(',', ' ').replace(';', ' ').replace(':', ' ').split()]
+    index = []
+    for block in blocks:
+        if '-' in block:
+            start, end = [int(x) for x in block.split('-')]
+            for i in range(start, end + 1):
+                index.append(i)
+        else:
+            index.append(int(block))
+    return index
+
+
+def get_device_list(num_workers, gpu_number_list):
+    device_list = []
+    for i in range(num_workers):
+        if i < len(gpu_number_list):
+            device_list.append(f'cuda:{gpu_number_list[i]}')
+        else:
+            device_list.append('cpu')
+    return device_list
+
