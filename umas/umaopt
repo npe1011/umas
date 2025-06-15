@@ -94,9 +94,9 @@ def worker_task(atoms: Atoms, charge: int, mult: int, fixed_indices: list,
     except Exception:
         try:
             energy = atoms.get_potential_energy() / Hartree
-            atoms.calc = None
         except Exception:
             energy = 0.0
+        atoms.calc = None
         return atoms, energy, False
 
 
