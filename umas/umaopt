@@ -61,7 +61,7 @@ def parse_args():
 
 
 def get_worker_name(x):
-    time.sleep(1)
+    time.sleep(0.2)
     return multiprocessing.current_process().name
 
 
