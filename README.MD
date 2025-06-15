@@ -1,9 +1,9 @@
-# UMA calculator interface for ORCA6 and GRRM
+# UMA calculator interface for ORCA6 and GRRM, and simple optimization script
 
 ## Abstract
 This is a interface program to use Meta's UMA (universal neural network potential) based on Omol25 [ https://arxiv.org/abs/2505.08762 ] for ORCA6 and GRRM programs.
-You need to obtain a parameter file from Huggin Face [ https://huggingface.co/facebook/UMA ]. 
-
+You need to obtain a parameter file from Huggin Face [ https://huggingface.co/facebook/UMA ]. `umaopt` is a simple structure optimization script.
+ 
 ## Software version
 We tested this interface with GRRM23, ORCA 6.0.1.
 We used Python 3.12, torch==2.6.0, fairchem-core==2.2.0.
