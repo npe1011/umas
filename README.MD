@@ -44,7 +44,7 @@ export PATH=/opt/uma:$PATH
 ```
 
 ## How does it work?
-As loading the model file and prepare the calculator shows a large overhead compared to actual calculation, the calculator server (umas) is created before running ORCA/GRRM in background and then calculation is performed via socket communication. Calculations should be run as follows.
+Because loading the model file and preparing the calculator show a large overhead compared to actual calculation, the calculator server (umas) is created before running ORCA/GRRM in background and then calculation is performed via socket communication. Calculations should be run as follows.
 
 ```
 umas start &
@@ -201,6 +201,16 @@ $ umaopt input.xyz -p 4 -t 2
 
 # Optimization using GPU (1 process)
 $ umaopt input.xyz --gpu
+```
+
+**Optimization with Atom Constraints**
+
+Optimizations can be performed with fixing several atoms, which is useful for preoptimization of transition state structures.
+`--constrain` option is followed by atom indices (1-based, NOT 0-based like in ASE).
+The following examples run optimization with atom 8,10,64,65,66,67 fixed.
+
+```
+umaopt init.xyz --constrain 8,10,64,65,66,67
 ```
 
 **Other Commandline Options**
