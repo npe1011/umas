@@ -1,4 +1,4 @@
-# UMA calculator interface for ORCA6 and GRRM, and simple optimization script
+# UMA calculator interface for Gaussian, ORCA6 and GRRM, and simple optimization script
 
 ## Abstract
 This is a interface program to use Meta's UMA (universal neural network potential) based on Omol25 [ https://arxiv.org/abs/2505.08762 ] for Gaussian16, ORCA6, GRRM programs.
