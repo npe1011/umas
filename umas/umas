@@ -151,7 +151,7 @@ def main():
     parser = argparse.ArgumentParser('uma ase calculator server')
     parser.add_argument('command', choices=['start', 'exit'])
     parser.add_argument('--np', '-n', '-p', type=int, default=1)
-    parser.add_argument('--model', '-m', choices=MODEL_NAMES, default='small0')
+    parser.add_argument('--model', '-m', choices=MODEL_NAMES, default='small')
     # parser.add_argument('--gpu', '-g', nargs='?', const='0', default='None')
     parser.add_argument('--gpu', '-g', action='store_true')
     args = parser.parse_args()

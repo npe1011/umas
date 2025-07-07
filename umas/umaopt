@@ -74,7 +74,7 @@ def parse_args():
     parser.add_argument('--threads', '-t', type=int, default=1, help='Number of threads per process')
     parser.add_argument('--charge', '-c', type=int, default=0, help='Total molecular charge')
     parser.add_argument('--mult', '-m', type=int, default=1, help='Spin multiplicity')
-    parser.add_argument('--model', choices=MODEL_NAMES, default='small0')
+    parser.add_argument('--model', choices=MODEL_NAMES, default='small')
     # parser.add_argument('--gpu', '-g', nargs='?', const='0', default='None')
     parser.add_argument('--gpu', '-g', action='store_true')
     parser.add_argument('--fmax', type=float, default=0.05, help='Convergence criteria')
