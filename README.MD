@@ -6,7 +6,7 @@ You need to obtain a parameter file from Huggin Face [ https://huggingface.co/fa
  
 ## Software version
 We tested this interface with Gaussian16 RevC01, GRRM23, ORCA 6.1.0/6.0.1
-We used Python 3.12, torch==2.6.0, fairchem-core==2.2.0.
+We used Python 3.12, torch==2.6.0, fairchem-core==2.3.0.
 
 ## Create Python Environment for UMA with fairchem-core
 uv [https://docs.astral.sh/uv/] is recommended to create virtual environment. After installing uv, please create venv as follows.
@@ -18,7 +18,7 @@ cd ~/venv
 uv venv --python 3.12 uma
 source uma/bin/activate
 uv pip install torch==2.6.0
-uv pip install fairchem-core==2.2.0
+uv pip install fairchem-core==2.3.0
 ```
 Before running calculation, you need to activate this venv by
 ```
@@ -36,8 +36,10 @@ Download parameter files and place it into the same directory.
 ├── gau2umas
 ├── grrm2umas
 ├── orca2umas
+├── uma-m-1p1.pt
 ├── umaopt
 ├── umas
+├── uma-s-1p1.pt
 └── uma-s-1.pt
 ```
 
@@ -79,8 +81,12 @@ umas exit
 ```
 
 ## Select model
-Currently, only the old small model (--model s0, default) can work. Under debugging... 
-
+Add `--model NAME` options as below.
+```
+umas start --model s0  # Old model uma-s-1.pt (s0 or small0)
+umas start --model s   # model uma-s-1p1.pt (s or small) [default]
+umas start --model m   # model uma-m-1p1.pt (m or medium)
+```
 
 ## Gaussian16
 Input file (route section) is be as follows. For opt, opt=nomicro is necessary.
