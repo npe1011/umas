@@ -1,11 +1,11 @@
 # UMA calculator interface for ORCA6 and GRRM, and simple optimization script
 
 ## Abstract
-This is a interface program to use Meta's UMA (universal neural network potential) based on Omol25 [ https://arxiv.org/abs/2505.08762 ] for ORCA6 and GRRM programs.
+This is a interface program to use Meta's UMA (universal neural network potential) based on Omol25 [ https://arxiv.org/abs/2505.08762 ] for Gaussian16, ORCA6, GRRM programs.
 You need to obtain a parameter file from Huggin Face [ https://huggingface.co/facebook/UMA ]. `umaopt` is a simple structure optimization script.
  
 ## Software version
-We tested this interface with GRRM23, ORCA 6.0.1.
+We tested this interface with Gaussian16 RevC01, GRRM23, ORCA 6.1.0/6.0.1
 We used Python 3.12, torch==2.6.0, fairchem-core==2.2.0.
 
 ## Create Python Environment for UMA with fairchem-core
@@ -29,12 +29,14 @@ In addition, you need to appropriately setup ORCA or GRRM you want to use.
 
 ## Setup this Interface and parameter file
 Just copy all script files in one directory and add the directory to PATH.
-Download parameter file (uma-s-1.pt) and place it into the same directory.
+Download parameter files and place it into the same directory.
 ```
 /opt/uma
 ├── _common_utils.py
+├── gau2umas
 ├── grrm2umas
 ├── orca2umas
+├── umaopt
 ├── umas
 └── uma-s-1.pt
 ```
@@ -55,7 +57,7 @@ umas exit
 When starting umas, port number is automatically set and saved in `/tmp/umas_port_${JOB_ID}.json`.
 `${JOB_ID}` is automatically set from the environmental variable: `${UMA_JOBID}` `${PBS_JOBID}` `${LSB_JOBID}` `${SLURM_JOB_ID}` `${PJM_JOBID}`. If not set, `{$USER}_default` is used. This ID must be unique to avoid confusion of socket communication. When you run a job in a queuing system such as PBS or Slurm, you might not need to care because the corresponding JOB ID is set by the queuing system. In other cases, please set `${UMA_JOBID}` with a unique string. 
 
-## Using GPU
+## Calculate with GPU
 Add `--gpu` or `-g` option.
 ```
 umas start --gpu &
@@ -73,6 +75,30 @@ For example, in the following case, 1 workers use GPU and the other 3 workers us
 ```
 umas start -p 4 --gpu &
 COMMAND TO RUN CALCULATION
+umas exit
+```
+
+## Select model
+Currently, only the old small model (--model s0, default) can work. Under debugging... 
+
+
+## Gaussian16
+Input file (route section) is be as follows. For opt, opt=nomicro is necessary.
+```
+# SP External='gau2umas'
+# OPT=(nomicro,maxcycle=1000) External='gau2umas'
+```
+Batch shell script is as follows. It is noted that the thread parallelization should be given as environmental variable `UMA_THREADS` or `OMP_NUM_THREADS`. `%nprocshared` does not affect the thread parallelization of uma calculation.
+```
+# Setup g16 before here
+source ~/venv/uma/bin/activate
+export PATH=/opt/uma:$PATH
+
+# number of cpu core to be used. OMP_NUM_THREADS can also work.
+export UMA_THREADS=8
+
+umas start &
+g16 jobname.gjf
 umas exit
 ```
 
