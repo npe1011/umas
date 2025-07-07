@@ -3,7 +3,6 @@ import sys
 import socket
 import multiprocessing
 import os
-import time
 import argparse
 import shutil
 import warnings
@@ -20,11 +19,35 @@ from fairchem.core.units.mlip_unit import load_predict_unit
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from _common_utils import recv_pickle, send_pickle, get_port_number, save_port_file, remove_port_file
-from _common_utils import read_int_list_string, get_device_list
+# from _common_utils import read_int_list_string, get_device_list
+
 
 MODEL_FILE = {
-    'small': 'uma-s-1.pt'
+    # Names for small version 1
+    's0': 'uma-s-1.pt',
+    'small0': 'uma-s-1.pt',
+    'uma-s-1.pt': 'uma-s-1.pt',
+    'uma-s-1': 'uma-s-1.pt',
+    's-1': 'uma-s-1.pt',
+    's1': 'uma-s-1.pt',
+    # Names for small version 1p1
+    's': 'uma-s-1p1.pt',
+    'small': 'uma-s-1p1.pt',
+    'uma-s-1p1.pt': 'uma-s-1p1.pt',
+    'uma-s-1p1': 'uma-s-1p1.pt',
+    's-1p1': 'uma-s-1p1.pt',
+    's1p1':  'uma-s-1p1.pt',
+    # Names for medium version 1p1
+    'm': 'uma-m-1p1.pt',
+    'medium': 'uma-m-1p1.pt',
+    'middle': 'uma-m-1p1.pt',
+    'uma-m-1p1.pt': 'uma-m-1p1.pt',
+    'uma-m-1p1': 'uma-m-1p1.pt',
+    'm-1p1': 'uma-m-1p1.pt',
+    'm1p1': 'uma-m-1p1.pt',
 }
+
+MODEL_NAMES = MODEL_FILE.keys()
 
 
 def process_task(task, calculator):
@@ -33,14 +56,38 @@ def process_task(task, calculator):
         os.environ['OMP_NUM_THREADS'] = str(task['num_threads'])
         os.environ['MKL_NUM_THREADS'] = str(task['num_threads'])
 
-        symbols = []
-        positions = []
-        for line in task['coord']:
-            parts = line.split()
-            symbols.append(parts[0])
-            positions.append([float(x) for x in parts[1:4]])
+        # Check atomic symbols or numbers
+        try:
+            int(task['coord'][0].split()[0].strip())
+        except (TypeError, ValueError):
+            symbol = True
+        else:
+            symbol = False
 
-        atoms = Atoms(symbols=symbols, positions=positions)
+        # Case Symbol (char)
+        if symbol:
+            symbols = []
+            positions = []
+            for line in task['coord']:
+                if line.strip() == '':
+                    continue
+                parts = line.split()
+                symbols.append(parts[0])
+                positions.append([float(x) for x in parts[1:4]])
+            atoms = Atoms(symbols=symbols, positions=positions)
+
+        # Case atomic numbers (int)
+        else:
+            numbers = []
+            positions = []
+            for line in task['coord']:
+                if line.strip() == '':
+                    continue
+                parts = line.split()
+                numbers.append(parts[0])
+                positions.append([float(x) for x in parts[1:4]])
+            atoms = Atoms(numbers=numbers, positions=positions)
+
         atoms.info = {'charge': task['charge'], 'spin': task['mult']}
         atoms.set_calculator(calculator)
 
@@ -104,7 +151,7 @@ def main():
     parser = argparse.ArgumentParser('uma ase calculator server')
     parser.add_argument('command', choices=['start', 'exit'])
     parser.add_argument('--np', '-n', '-p', type=int, default=1)
-    parser.add_argument('--model', '-m', choices=['small'], default='small')
+    parser.add_argument('--model', '-m', choices=MODEL_NAMES, default='small0')
     # parser.add_argument('--gpu', '-g', nargs='?', const='0', default='None')
     parser.add_argument('--gpu', '-g', action='store_true')
     args = parser.parse_args()

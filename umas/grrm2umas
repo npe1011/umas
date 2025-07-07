@@ -155,13 +155,17 @@ def main():
     if uma_mult is not None:
         if len(uma_mult.strip()) > 0:
             mult = int(uma_mult.strip())
-    
-    # num_threads
-    num_threads = 1
-    uma_threads = os.environ.get(UMA_THREADS)
-    if uma_threads is not None:
-        if len(uma_threads.strip()) > 0:
-            num_threads = int(uma_threads.strip())
+
+    # Get num_threads
+    num_threads = None
+    for name in [UMA_THREADS, 'OMP_NUM_THREADS']:
+        value = os.environ.get(name)
+        if value is not None:
+            if len(value.strip()) > 0:
+                num_threads = int(value.strip())
+                break
+    if num_threads is None:
+        num_threads = 1
 
     # coord: List[str]
     coord = input_data.atom_coordinates + input_data.frozen_atom_coordinates

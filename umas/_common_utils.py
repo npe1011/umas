@@ -69,8 +69,8 @@ def remove_port_file():
 def send_task(task):
     port_file = get_port_file()
 
-    # Wait until port file is found (max 100 sec)
-    timeout = 100
+    # Wait until port file is found (max 300 sec)
+    timeout = 300
     interval = 0.5
     elapsed = 0.0
     while not os.path.isfile(port_file):

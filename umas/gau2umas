@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+# start_uma script must be run first to launch calculator server
+import os
+import sys
+
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from _common_utils import send_task
+
+
+# Name for environmental variables for UMA Settings
+UMA_THREADS = 'UMA_THREADS'
+
+# Unit convertion
+BOHR2AU = 0.529177249
+
+
+def main():
+    # Gau_External layer InputFile OutputFile MsgFile FChkFile MatElFile
+    # Gau_External can have several arguments like : script --option layer ...
+    args = sys.argv
+    input_file = args[-5]
+    # input_dir = os.path.dirname(os.path.abspath(args[-5]))  # input file directory (Gaussian scratch)
+    output_file = args[-4]  # Output file read by Gaussian
+    log_file = args[-3]  # Error messages are written.
+    # additional_args = args[1:-5]
+
+    # Read input
+    with open(input_file, 'r') as f:
+        input_data = f.readlines()
+
+    # atoms  derivatives-requested  charge  multi
+    num_atoms, derivatives_type, charge, mult = [int(x) for x in input_data[0].strip().split()]
+    # calculator server requires Atom X Y Z in angstrom unit, List[str]
+    coord = []
+    for line in input_data[1:num_atoms+1]:
+        parts = line.strip().split()
+        coord.append(f'{parts[0]} {float(parts[1])*BOHR2AU:20.12f} {float(parts[2])*BOHR2AU:20.12f} {float(parts[3])*BOHR2AU:20.12f}\n')
+
+    # Get num_threads
+    num_threads = None
+    for name in [UMA_THREADS, 'OMP_NUM_THREADS']:
+        value = os.environ.get(name)
+        if value is not None:
+            if len(value.strip()) > 0:
+                num_threads = int(value.strip())
+                break
+    if num_threads is None:
+        num_threads = 1
+
+    # Calculate by Calculator Sever
+    task = {
+        'charge': charge,
+        'mult': mult,
+        'num_threads': num_threads,
+        'coord': coord,
+        'hessian': derivatives_type == 2
+    }
+
+    result = send_task(task)
+
+    # Error
+    if 'error' in result:
+        with open(log_file, 'w') as f:
+            f.write('---------------------Error in ASE Fairchem calculator---------------------\n')
+            f.write(result['error'])
+
+    # Normal Termination
+    else:
+        # Prepare output file for Gaussian
+        output_data = []
+
+        # energy, dipole-moment (xyz)	 	E, Dip(I), I=1,3	 	4D20.12
+        output_data.append('{0:20.12e}{1:20.12e}{2:20.12e}{3:20.12e}\n'.format(result['energy'], 0.0, 0.0, 0.0))
+
+        # gradient on atom (xyz)	 	FX(J,I), J=1,3; I=1,NAtoms	 	3D20.12
+        if derivatives_type >= 1:
+            gradient = result['gradient']
+            for n in range(num_atoms):
+                output_data.append('{0:20.12e}{1:20.12e}{2:20.12e}\n'.format(gradient[n][0], gradient[n][1], gradient[n][2]))
+
+        # polarizability	 	Polar(I), I=1,6	 	3D20.12   (dummy)
+        # dipole derivatives	 	DDip(I), I=1,9*NAtoms	 	3D20.12 (dummy)
+        for n in range(3 * num_atoms + 2):
+            output_data.append('{0:20.12e}{1:20.12e}{2:20.12e}\n'.format(0.0, 0.0, 0.0))
+
+        # force constants	 	FFX(I), I=1,(3*NAtoms*(3*NAtoms+1))/2	 	3D20.12
+        if derivatives_type == 2:
+            hessian = result['hessian']
+            # convert to gaussian format
+            gaussian_hessian = []
+            temp = []
+            for i in range(num_atoms*3):
+                for j in range(i+1):
+                    temp.append(hessian[i][j])
+                    if len(temp) == 3:
+                        gaussian_hessian.append(temp)
+                        temp = []
+            for line in gaussian_hessian:
+                output_data.append('{0:20.12e}{1:20.12e}{2:20.12e}\n'.format(line[0], line[1], line[2]))
+
+        # Prepare output file for Gaussian
+        with open(output_file, 'w') as f:
+            f.writelines(output_data)
+        with open(log_file, 'w') as f:
+            f.write('')
+
+
+if __name__ == '__main__':
+    main()

@@ -25,8 +25,31 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from _common_utils import read_int_list_string, get_device_list
 
 MODEL_FILE = {
-    'small': 'uma-s-1.pt'
+    # Names for small version 1
+    's0': 'uma-s-1.pt',
+    'small0': 'uma-s-1.pt',
+    'uma-s-1.pt': 'uma-s-1.pt',
+    'uma-s-1': 'uma-s-1.pt',
+    's-1': 'uma-s-1.pt',
+    's1': 'uma-s-1.pt',
+    # Names for small version 1p1
+    's': 'uma-s-1p1.pt',
+    'small': 'uma-s-1p1.pt',
+    'uma-s-1p1.pt': 'uma-s-1p1.pt',
+    'uma-s-1p1': 'uma-s-1p1.pt',
+    's-1p1': 'uma-s-1p1.pt',
+    's1p1':  'uma-s-1p1.pt',
+    # Names for medium version 1p1
+    'm': 'uma-m-1p1.pt',
+    'medium': 'uma-m-1p1.pt',
+    'middle': 'uma-m-1p1.pt',
+    'uma-m-1p1.pt': 'uma-m-1p1.pt',
+    'uma-m-1p1': 'uma-m-1p1.pt',
+    'm-1p1': 'uma-m-1p1.pt',
+    'm1p1': 'uma-m-1p1.pt',
 }
+
+MODEL_NAMES = MODEL_FILE.keys()
 
 # Calculator is saved in Global in worker process to avoid reload Calculator and Model.
 CALCULATOR = None
@@ -51,7 +74,7 @@ def parse_args():
     parser.add_argument('--threads', '-t', type=int, default=1, help='Number of threads per process')
     parser.add_argument('--charge', '-c', type=int, default=0, help='Total molecular charge')
     parser.add_argument('--mult', '-m', type=int, default=1, help='Spin multiplicity')
-    parser.add_argument('--model', choices=['small'], default='small')
+    parser.add_argument('--model', choices=MODEL_NAMES, default='small0')
     # parser.add_argument('--gpu', '-g', nargs='?', const='0', default='None')
     parser.add_argument('--gpu', '-g', action='store_true')
     parser.add_argument('--fmax', type=float, default=0.05, help='Convergence criteria')
