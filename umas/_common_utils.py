@@ -5,6 +5,7 @@ import time
 import socket
 import json
 import sys
+from typing import Optional
 
 
 def get_job_id():
@@ -109,4 +110,29 @@ def get_device_list(num_workers, gpu_number_list):
         else:
             device_list.append('cpu')
     return device_list
+
+
+def daemonize(error_log_file: Optional[str] = None):
+    if os.fork() > 0:
+        sys.exit(0)
+
+    os.setsid()
+
+    if os.fork() > 0:
+        sys.exit(0)
+
+    sys.stdout.flush()
+    sys.stderr.flush()
+
+    if error_log_file is None:
+        error_redirect = os.devnull
+    else:
+        error_redirect = error_log_file
+
+    with open(os.devnull, 'r') as devnull_in, \
+         open(os.devnull, 'a') as devnull_out, \
+         open(error_redirect, 'a') as errfile:
+        os.dup2(devnull_in.fileno(), sys.stdin.fileno())
+        os.dup2(devnull_out.fileno(), sys.stdout.fileno())
+        os.dup2(errfile.fileno(), sys.stderr.fileno()) 
 
