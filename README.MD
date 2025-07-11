@@ -1,8 +1,8 @@
-# UMA calculator interface for Gaussian, ORCA6 and GRRM, and simple optimization script
+# UMA calculator interface for Gaussian/ORCA6/GRR and simple optimization script
 
 ## Abstract
-This is a interface program to use Meta's UMA (universal neural network potential) based on Omol25 [ https://arxiv.org/abs/2505.08762 ] for Gaussian16, ORCA6, GRRM programs.
-You need to obtain a parameter file from Huggin Face [ https://huggingface.co/facebook/UMA ]. `umaopt` is a simple structure optimization script.
+This is a interface program to use Meta's UMA (universal ML atomic potential) based on Omol25 [ https://arxiv.org/abs/2505.08762 ] for Gaussian16, ORCA6, GRRM programs.
+You need to obtain parameter files from Hugging Face [ https://huggingface.co/facebook/UMA ] before hand. `umaopt` is a simple structure optimization script.
  
 ## Software version
 We tested this interface with Gaussian16 RevC01, GRRM23, ORCA 6.1.0/6.0.1
@@ -47,35 +47,36 @@ Download parameter files and place it into the same directory.
 export PATH=/opt/uma:$PATH
 ```
 
-## How does it work?
-Because loading the model file and preparing the calculator show a large overhead compared to actual calculation, the calculator server (umas) is created before running ORCA/GRRM in background and then calculation is performed via socket communication. Calculations should be run as follows.
+## How to use
+Because loading the model file and preparing the calculator show a large overhead compared to actual calculation, the calculator server (umas) is created before running Gaussian/ORCA/GRRM and then calculation is performed via socket communication. Calculations should be run as follows.
+In the current version, you don't need to run `uma start` as a background job with `&` suffix. The calculators are daemonized.
 
 ```
-umas start &
+umas start
 COMMAND TO RUN CALCULATION
 umas exit
 ```
 
 When starting umas, port number is automatically set and saved in `/tmp/umas_port_${JOB_ID}.json`.
-`${JOB_ID}` is automatically set from the environmental variable: `${UMA_JOBID}` `${PBS_JOBID}` `${LSB_JOBID}` `${SLURM_JOB_ID}` `${PJM_JOBID}`. If not set, `{$USER}_default` is used. This ID must be unique to avoid confusion of socket communication. When you run a job in a queuing system such as PBS or Slurm, you might not need to care because the corresponding JOB ID is set by the queuing system. In other cases, please set `${UMA_JOBID}` with a unique string. 
+`${JOB_ID}` is automatically set from the environmental variable: `${UMA_JOBID}` `${PBS_JOBID}` `${LSB_JOBID}` `${SLURM_JOB_ID}` `${PJM_JOBID}`. If not set, `{$USER}_default` is used. This ID must be unique to avoid confusion of socket communication. When you run a job in a queuing system such as PBS or Slurm, you might not need to care because the corresponding JOB ID is set by the queuing system. In other cases, please set `${UMA_JOBID}` with a unique string by `export UMA_JOBID=xxxxxxxxx`.
 
 ## Calculate with GPU
 Add `--gpu` or `-g` option.
 ```
-umas start --gpu &
+umas start --gpu
 COMMAND TO RUN CALCULATION
 umas exit
 ```
 
 Currently, fairchem seems to be unable to use GPU number like 'cuda:0' but just to use 'cuda' as device. 
-When GPU is selected, num_threads set by ORCA interface (same as ORCA pal) or by user (GRRM) is not meaningful
-because it is only for CPU threading.
+When GPU is selected, num_threads set by ORCA interface (same as ORCA pal) or by user (Gaussina and GRRM) is not meaningful
+because it is only for CPU multithreading.
 
 By adding `-p N` option, you can start multiple calculation workers (see GRRM Multiprocess Job).
 In this case, one GPU is used by one worker, and the other workers use cpu.
-For example, in the following case, 1 workers use GPU and the other 3 workers use CPU.
+For example, in the following case, 1 worker uses GPU and the other 3 workers use CPU.
 ```
-umas start -p 4 --gpu &
+umas start -p 4 --gpu
 COMMAND TO RUN CALCULATION
 umas exit
 ```
@@ -89,27 +90,30 @@ umas start --model m   # model uma-m-1p1.pt (m or medium)
 ```
 
 ## Gaussian16
-Input file (route section) is be as follows. For opt, opt=nomicro is necessary.
+Input file (route section) is as follows. For opt, opt=nomicro is necessary.
 ```
 # SP External='gau2umas'
 # OPT=(nomicro,maxcycle=1000) External='gau2umas'
 ```
 Batch shell script is as follows. It is noted that the thread parallelization should be given as environmental variable `UMA_THREADS` or `OMP_NUM_THREADS`. `%nprocshared` does not affect the thread parallelization of uma calculation.
 ```
-# Setup g16 before here
+#########################
+# Setup g16 before here #
+#########################
+
 source ~/venv/uma/bin/activate
 export PATH=/opt/uma:$PATH
 
-# number of cpu core to be used. OMP_NUM_THREADS can also work.
+# number of cpu cores to be used. OMP_NUM_THREADS can also work.
 export UMA_THREADS=8
 
-umas start &
+umas start
 g16 jobname.gjf
 umas exit
 ```
 
 ## ORCA6
-Input file is be as follows. Only energy and gradient calculations are available. If you need freq, please select NumFreq.
+Input file is as follows. Only energy and gradient calculations are available. If you need freq, please select NumFreq.
 ```
 ! ExtOPT TightOpt
 
@@ -123,12 +127,15 @@ end
 ```
 Batch shell script is as follows.
 ```
-# Setup ORCA before here
+##########################
+# Setup ORAC before here #
+##########################
+
 source ~/venv/uma/bin/activate
 export PATH=/opt/uma:$PATH
 ORCA_EXEC=`which orca`
 
-umas start &
+umas start
 ${ORCA_EXEC} jobname.inp > jobname.out
 umas exit
 ```
@@ -160,7 +167,10 @@ export UMA_THREADS=4
 Batch shell script is as follows.
 
 ```
-# Setup ORCA before here
+##########################
+# Setup GRRM before here #
+##########################
+
 source ~/venv/uma/bin/activate
 export PATH=/opt/uma:$PATH
 
@@ -169,7 +179,7 @@ export UMA_MULTI=1
 export UMA_THREADS=4
 
 # Run
-umas start & 
+umas start
 GRRM23p jobname -s36000
 umas exit
 ```
@@ -205,7 +215,10 @@ export UMA_THREADS=2
 Batch shell script is as follows. When starting umas, `--np` or `-p` options should be added to create multiple calulation workers. In the following case, 10 processes x 2 threads = 20 cores are used. 
 
 ```
-# Setup ORCA before here
+##########################
+# Setup GRRM before here #
+##########################
+
 source ~/venv/uma/bin/activate
 export PATH=/opt/uma:$PATH
 
@@ -214,14 +227,14 @@ export UMA_MULTI=1
 export UMA_THREADS=2
 
 # Run
-umas start -p 10 & 
+umas start -p 10
 GRRM23p jobname -s36000 -p10
 umas exit
 ```
 
 ## Simple Optimizer (ASE LBFGS optimizer)
 
-`umaopt` is a simple optimizer to use xyz file as an input. In case multiple structures are included, all the structures are optimized with the same settings. The comment lines of the outpuf files are energies in Hartree unit, which would be useful when using crest/cregen for sorting and clustering.
+`umaopt` is a simple optimizer script to use an xyz file as an input. In case multiple structures are included, all the structures are optimized with the same settings. The comment lines of the outpuf files are energies in Hartree unit, which would be useful when using crest/cregen for sorting and clustering.
 
 **Usage**
 ```
