@@ -1,4 +1,4 @@
-# UMA calculator interface for Gaussian/ORCA6/GRR and simple optimization script
+# UMA calculator interface for Gaussian/ORCA6/GRRM and simple optimization script
 
 ## Abstract
 This is a interface program to use Meta's UMA (universal ML atomic potential) based on Omol25 [ https://arxiv.org/abs/2505.08762 ] for Gaussian16, ORCA6, GRRM programs.
@@ -265,3 +265,4 @@ umaopt init.xyz --constrain 8,10,64,65,66,67
 --fmax <float>: Convergence criteria (same as ASE)
 --maxcycle <int>: Max cycles of optimization
 ```
+
